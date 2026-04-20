@@ -1,10 +1,9 @@
 import os
-import subprocess
-import sys
 import shutil
+from .core.dependency_manager import setup_dependencies, run_command
 
 # --- CONFIGURACIÓN DE DEPENDENCIAS ---
-DEPENDENCIAS = {
+DEPENDENCIAS_SISTEMA = {
     "smartctl": "smartmontools",
     "deborphan": "deborphan",
     "zramctl": "zram-tools",
@@ -12,102 +11,80 @@ DEPENDENCIAS = {
     "docker": "docker.io"
 }
 
-def check_and_install_dependencies():
-    print("[*] Verificando dependencias del sistema...")
-    for comando, paquete in DEPENDENCIAS.items():
+def install_system_tools():
+    print("[*] Verificando herramientas de sistema...")
+    for comando, paquete in DEPENDENCIAS_SISTEMA.items():
         if shutil.which(comando) is None:
-            print(f"[!] '{comando}' no encontrado. Instalando {paquete}...")
-            try:
-                subprocess.run(f"sudo apt update && sudo apt install -y {paquete}", shell=True, check=True)
-                print(f"[+] {paquete} instalado correctamente.")
-            except subprocess.CalledProcessError:
-                print(f"[X] Error al intentar instalar {paquete}. Revisa tu conexión.")
+            run_command(f"sudo apt update && sudo apt install -y {paquete}", f"Instalando {paquete}")
         else:
             print(f"[OK] {comando} ya está instalado.")
 
-def run_command(command, description):
-    print(f"\n[+] {description}...")
-    try:
-        subprocess.run(command, shell=True, check=True)
-    except subprocess.CalledProcessError:
-        print(f"[!] Falló la ejecución de: {description}")
-
 def setup_zram():
-    print("\n--- Configuración de ZRAM (Optimización de RAM) ---")
+    print("\n--- Configuración de ZRAM ---")
     zram_config = "ALGO=lz4\nPERCENT=60\nPRIORITY=100\n"
-    subprocess.run(f"echo '{zram_config}' | sudo tee /etc/default/zramswap", shell=True)
+    # Encadenamos comandos usando la utilidad del core
+    run_command(f"echo '{zram_config}' | sudo tee /etc/default/zramswap", "Escribiendo configuración")
     run_command("sudo modprobe zram && sudo systemctl restart zramswap", "Activando ZRAM")
 
 def docker_purge():
     print("\n--- Limpieza Profunda de Docker ---")
+    # Verificación rápida de estado
+    import subprocess
     status = subprocess.run("systemctl is-active docker", shell=True, capture_output=True, text=True)
-    if status.stdout.strip() == "active":
-        run_command("sudo docker system prune -a --volumes -f", "Eliminando imágenes, contenedores y volúmenes huérfanos")
+    
+    cmd = "sudo docker system prune -a --volumes -f"
+    if "active" in status.stdout:
+        run_command(cmd, "Eliminando recursos de Docker")
     else:
-        print("[!] Docker no está activo. Iniciándolo temporalmente para limpiar...")
-        run_command("sudo systemctl start docker && sudo docker system prune -a --volumes -f && sudo systemctl stop docker", "Limpieza con inicio/cierre temporal")
+        run_command(f"sudo systemctl start docker && {cmd} && sudo systemctl stop docker", "Limpieza temporal")
 
 def main():
-    check_and_install_dependencies()
+    # Inicialización
+    install_system_tools()
     
     while True:
         print("\n" + "═"*55)
-        print("      FRAUSTECH TOOLKIT v2.1 - OPTIMIZACIÓN KALI")
+        print("      FRAUSTECH TOOLKIT v2.3 - CORE REFACTOR")
         print("═"*55)
-        print(" 1. [INFO] Características del Notebook y CPU")
-        print(" 2. [INFO] Salud del Disco Duro (S.M.A.R.T.)")
-        print(" 3. [LIMPIEZA] Apt, Caché y Huérfanos (deborphan)")
-        print(" 4. [LIMPIEZA] Logs del sistema (Journalctl)")
-        print(" 5. [OPTIMIZAR] Configurar ZRAM y Swappiness=10")
-        print(" 6. [SERVICIOS] DESACTIVAR carga de Docker/VirtualBox")
-        print(" 7. [SERVICIOS] ACTIVAR Entorno (Docker/VBox) ahora")
-        print(" 8. [ESTADO] Ver RAM, ZRAM y Swap actual")
-        print(" 9. [DOCKER] Purge total (Imágenes, Redes y VOLÚMENES)")
-        print(" 12. [SALUD] Chequeo de Temperatura y Frecuencia")
-        print(" 13. [SALUD] Informe detallado de Batería (Diagnóstico)")
-        print(" 14. [SEGURIDAD] Escaneo de sectores dañados (Rápido)")
+        print(" 1. [INFO] Hardware/CPU          8. [ESTADO] RAM/ZRAM")
+        print(" 2. [INFO] Salud Disco           9. [DOCKER] Purga Total")
+        print(" 3. [LIMPIEZA] Apt/Huérfanos    12. [SALUD] Temp/Reloj")
+        print(" 4. [LIMPIEZA] Logs Systemd     13. [SALUD] Batería")
+        print(" 5. [OPTIMIZAR] ZRAM/Swap       14. [SEGURIDAD] SMART Test")
         print(" 0. Salir")
         
         opcion = input("\nSeleccione una opción: ")
 
         match opcion:
             case "1":
-                print("\n--- Información de Hardware ---")
                 os.system("lscpu | grep -E 'Model name|CPU\(s\)|Thread'")
-                os.system("sudo dmidecode -s system-product-name")
-                os.system("sudo dmidecode -s system-manufacturer")
+                run_command("sudo dmidecode -s system-product-name", "Modelo")
             case "2":
-                run_command("sudo smartctl -H /dev/sda", "Verificando salud física del HDD")
+                run_command("sudo smartctl -H /dev/sda", "Salud HDD")
             case "3":
-                run_command("sudo apt clean && sudo apt autoremove --purge -y $(deborphan)", "Limpiando paquetes y huérfanos")
-                run_command("rm -rf ~/.cache/*", "Limpiando caché de usuario")
+                run_command("sudo apt clean && sudo apt autoremove --purge -y $(deborphan)", "Limpieza APT")
+                run_command("rm -rf ~/.cache/*", "Limpieza Caché Usuario")
             case "4":
-                run_command("sudo journalctl --vacuum-size=200M", "Reduciendo logs a 200MB")
+                run_command("sudo journalctl --vacuum-size=200M", "Rotación de Logs")
             case "5":
                 setup_zram()
-                swap_cmd = "echo 'vm.swappiness=10' | sudo tee -a /etc/sysctl.conf && sudo sysctl -p"
-                run_command(swap_cmd, "Configurando Swappiness=10 permanente")
+                run_command("echo 'vm.swappiness=10' | sudo tee -a /etc/sysctl.conf && sudo sysctl -p", "Swappiness")
             case "6":
-                servicios = "virtualbox.service docker.service docker.socket containerd.service"
-                run_command(f"sudo systemctl disable {servicios}", "Desactivando servicios del arranque")
+                run_command("sudo systemctl disable virtualbox docker docker.socket", "Desactivar servicios")
             case "7":
-                run_command("sudo systemctl start docker virtualbox", "Iniciando servicios de trabajo")
+                run_command("sudo systemctl start docker virtualbox", "Activar servicios")
             case "8":
                 os.system("free -h && swapon --show && zramctl")
             case "9":
                 docker_purge()
             case "12":
-                run_command("sensors", "Temperatura del CPU")
-                print("\n[+] Usa la opción 8 (s-tui) para ver la frecuencia en tiempo real.")
+                run_command("sensors", "Temperatura")
             case "13":
-                run_command("upower -i /org/freedesktop/UPower/devices/battery_BAT0", "Estado real de la batería")
+                run_command("upower -i /org/freedesktop/UPower/devices/battery_BAT0", "Batería")
             case "14":
-                run_command("sudo smartctl -t short /dev/sda", "Iniciando test de sectores (ejecuta en background)")
+                run_command("sudo smartctl -t short /dev/sda", "Smart Test")
             case "0":
-                print("Saliendo de Fraustech Toolkit...")
                 break
-            case _:
-                print("Opción no válida.")
 
 if __name__ == "__main__":
     main()

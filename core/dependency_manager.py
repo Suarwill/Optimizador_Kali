@@ -1,4 +1,3 @@
-# dependency_manager.py
 import sys, importlib, platform, subprocess, logging
 
 def is_virtual_env():
